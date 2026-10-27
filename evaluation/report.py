@@ -1,4 +1,4 @@
-"""Один отчёт A+B из существующих результатов. Отсутствующие замеры не выдумываются."""
+"""Формирование общего отчёта A+B по сохранённым результатам."""
 import csv
 import json
 import os
@@ -148,6 +148,9 @@ def main():
     Path('docs/defects.md').write_text('\n'.join(defects), encoding='utf-8')
     submission = Path('submission/results')
     submission.mkdir(parents=True, exist_ok=True)
+    for path in (submission / 'docs').glob('*.md'):
+        if not (Path('docs') / path.name).is_file():
+            path.unlink()
     for path in [*Path('metrics').glob('*.json'), *Path('docs').glob('*.md'), *Path('docs').glob('*.csv')]:
         target = submission / path.parent.name / path.name
         target.parent.mkdir(parents=True, exist_ok=True)

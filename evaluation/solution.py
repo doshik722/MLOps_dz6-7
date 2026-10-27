@@ -49,7 +49,7 @@ def _invalid_constant(value):
 
 
 def score(rows, outputs):
-    """Верните overall, slices и per_item. Не удаляйте плохие ответы из знаменателя.
+    """Подсчёт overall, slices и per_item с сохранением всех ответов в знаменателе.
 
     Строгий ответ: JSON с единственным строковым полем answer из choices.
     outputs: [{id, raw, error, latency_seconds}, ...].
@@ -134,9 +134,9 @@ def _validate_score(report, label):
 
 
 def quality_gate(baseline, candidate, critical_slices):
-    """Верните {passed: True, ...} или вызовите ValueError с причиной отказа.
+    """Возвращает {passed: True, ...} либо вызывает ValueError с причиной отказа.
 
-    Проверьте совместимость протокола/набора/baseline, метрики и counts,
+    Проверяются совместимость протокола/набора/baseline, метрики и counts,
     все id и срезы, общую accuracy/format_rate, критические срезы и behavior.
     Missing, NaN, пустой набор и ошибки генерации означают отказ.
     Пороги задаются до измерения; учебный допуск регрессии равен нулю.

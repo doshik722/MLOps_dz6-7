@@ -12,15 +12,15 @@ Docker Desktop установлен для текущего пользовате
 
 На первичной проверке Docker долго оставался в starting; после автоматической остановки по таймеру простоя возобновление также зависло. Выполнен перезапуск Docker/службы WSL без удаления дистрибутивов и volumes. На время подготовки таймер простоя Docker увеличивался до 3600 секунд; затем исходная настройка восстановлена. Остановленная hns сама по себе не установлена как причина: корректность запуска проверяется готовностью Engine и HTTP /health MLflow.
 
-Средство управления окнами не подключилось: failed to write kernel assets. Поэтому использованы CLI Docker и параметр customWslDistroDir; изменение GUI-приложений WSL не выполнялось.
+Для настройки Docker использованы CLI и параметр customWslDistroDir.
 
 Затем сборка выявила нехватку места на C: (около 6 МБ) и ошибки записи EXT4. Новое активное хранилище Docker настроено на D:\downloads_programs\Git_hub_progr\Labs_MLops\mlops26-hw6-7\docker-storage. Старый диск текущей установки без контейнеров/volumes сохранён в соседнем docker-storage-backup; SHA256 копии сверена перед освобождением исходного C:. После этого на C: стало около 5 ГБ свободно. Эти каталоги находятся вне Git и архивов сдачи. Первая загрузка WSL на этой машине может занимать около десяти минут: команды запускайте после готовности Docker Engine и MLflow /health.
 
 Обучения не потеряны: временный SQLite MLflow — logs/offline_mlflow.db, файлы — mlruns/. scripts/import_offline.py переносит parent и шесть кандидатов на Docker-сервер с полной историей метрик и SHA256 каждого файла. Карта IDs — metrics/offline-import.json. scripts/normalize_packages.py исправляет пути внутри MLmodel для Windows/HTTP и сохраняет доказательство в metrics/package-paths.json. Веса и результаты обучения эти операции не меняют.
 
-## Выполнение в видимом терминале
+## Порядок запуска
 
-Откройте терминал из корня hw67-broken. Makefile сам находит установленный Docker Desktop и Git Bash на Windows; не нужен фоновый запуск или просмотр отдельного журнала.
+Команды выполняются из корня hw67-broken. Makefile находит установленный Docker Desktop и Git Bash на Windows; вывод поступает в терминал.
 
 ```bash
 uv sync --frozen
@@ -55,11 +55,7 @@ make check-all
 
 После check-all можно ещё раз выполнить make evidence для упаковки актуальных JSON/Markdown/CSV. Он не обучает и не меняет alias. Исходные проверки выводят общий отпечаток tests/.
 
-## Что показать преподавателю
-
-Один ролик на 5–8 минут: 6 дочерних runs в MLflow, версии данных/кода и кривые; таблица comparison.csv; реестр candidate; baseline/candidate accuracy и срезы; 3 behavioral-кейса и diff; сохранённый отказ/принятие; отрицательная проверка; SHA256 probe после пересоздания; итог check-all и отпечаток. Часы обучения записывать не нужно.
-
-Для демонстрации готовой работы не запускайте весь поиск заново. Покажите сохранённые runs и docs/conclusion.md, затем make eval (ожидаемый отказ из-за регрессии), make check-negative и make check-all. Проверку хранения можно повторить через make check-storage: она пересоздаёт только сервис mlflow, сохраняя volumes. baseline-init повторно запускать не нужно: baseline уже закреплён.
+## Результаты и артефакты
 
 Обязательные отчёты: docs/comparison.csv, docs/defects.md, один docs/conclusion.md. Сырые ответы и метрики находятся в metrics/ и отдельно пакуются make evidence в submission/results.zip. Данные проверки приложены в submission/evaluation-data.zip и версионируются через data.dvc.
 

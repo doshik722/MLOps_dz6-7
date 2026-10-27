@@ -1,4 +1,4 @@
-"""Готовая обвязка: студент реализует score и quality_gate в solution.py."""
+"""Команды оценки и выпуска; score и quality_gate определены в solution.py."""
 import argparse
 import copy
 import gc
@@ -232,7 +232,7 @@ def update_baseline():
 def negative():
     baseline, candidate = current_reports()
     rows = read_rows(read_json('evaluation/params.json')['golden'])
-    # Меняем только копию raw-ответов и пересчитываем согласованные counts.
+    # Изменяется только копия raw-ответов, затем пересчитываются counts.
     ids = {r['id'] for r in rows}
     broken_outputs = copy.deepcopy(read_json('metrics/candidate-outputs.json'))
     for output in broken_outputs:
