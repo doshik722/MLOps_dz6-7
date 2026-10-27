@@ -10,6 +10,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+import mlflow
 from mlflow import MlflowClient
 from mlflow.entities import Metric, Param, RunTag
 
@@ -35,6 +36,7 @@ def main():
     import yaml
     params = yaml.safe_load(Path('params.yaml').read_text(encoding='utf-8'))
     uri = params['tracking']['uri'].rstrip('/')
+    mlflow.set_tracking_uri(uri)
     with urllib.request.urlopen(uri + '/health', timeout=5) as response:
         if response.status != 200:
             raise ValueError('MLflow Docker server is not ready')
