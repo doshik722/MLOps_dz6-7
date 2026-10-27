@@ -28,6 +28,8 @@ def main():
     gate, negative = optional('metrics/quality-gate.json'), optional('metrics/negative-gate.json')
     storage = optional('metrics/storage-check.json')
     released = optional('metrics/released.json')
+    imported = optional('metrics/offline-import.json')
+    verified = optional('metrics/verification.json')
     config = read_json('evaluation/params.json')
     table = []
     if Path('docs/comparison.csv').exists():
@@ -45,8 +47,12 @@ def main():
                   '| Имя | Run ID | r | lr | Val базы | Итоговый val | Время, с | Память, МБ | Папка адаптера, МБ |',
                   '|---|---|---:|---:|---:|---:|---:|---:|---:|']
         for row in table:
-            lines.append('| ' + ' | '.join(cell(row[k]) for k in ['name', 'run_id', 'r', 'lr', 'base_val_loss', 'final_val_loss', 'seconds', 'peak_memory_mb', 'adapter_mb']) + ' |')
+            values = [row[k] for k in ['name', 'run_id', 'r', 'lr']]
+            values += [f"{float(row[k]):.6f}" for k in ['base_val_loss', 'final_val_loss']]
+            values += [f"{float(row[k]):.1f}" for k in ['seconds', 'peak_memory_mb', 'adapter_mb']]
+            lines.append('| ' + ' | '.join(cell(v) for v in values) + ' |')
         lines += ['', f"Минимальный val loss у `{table[0]['name']}`: {table[0]['final_val_loss']}. Порог допуска в candidate: final/base ≤ 1; test/golden в выборе не использовались.", '']
+        lines += ['Память — максимум выбранных отсчётов RSS всего Python-процесса, а не непрерывный пик отдельной модели. Последовательные runs наследуют кэш аллокатора и импортированных библиотек; по этим значениям нельзя ранжировать чистую память адаптеров. Время относится к обучению/валидации, без загрузки базы и упаковки MLflow. adapter_mb включает токенизатор и manifest, поэтому это размер всей папки адаптера.', '']
     else:
         lines += ['Шесть запусков ещё не выполнены. comparison.csv и измеренные числа появятся после make sweep и make report.', '']
     lines += [f'Кандидат: `{json.dumps(candidate, ensure_ascii=False)}`' if candidate else 'Версия candidate пока не зарегистрирована.', '',
@@ -93,6 +99,10 @@ def main():
         except Exception as exc:
             lines += [f'Чтение champion: {type(exc).__name__}: {exc}. При непройденном gate новый champion не назначается.', '']
     lines += ['## Ссылки на MLflow и воспроизводимость', '']
+    if imported:
+        lines += ['Из-за первоначального сбоя Docker шесть обучений сначала записаны в локальный MLflow/SQLite. Затем реальные runs перенесены на HTTP-сервер без повторного обучения: сохранены параметры, вся история метрик с исходными timestamps, source snapshot и файлы моделей. Каждый файл кандидатов сверен по SHA256. Соответствие исходных и серверных IDs и хеши — metrics/offline-import.json. Внутренний run_id в неизменённом MLmodel хранит происхождение пакета; реестр ссылается на серверный run.', '']
+    if verified:
+        lines += [f"Приёмка исходными тестами: {verified.get('acceptance')}; unit-тесты: {verified.get('unit_tests')}; отпечаток {verified.get('tests_fingerprint')}.", '']
     uri = os.environ.get('MLFLOW_TRACKING_URI', 'http://127.0.0.1:5006')
     if uri.startswith(('http://', 'https://')) and sweep:
         from mlflow import MlflowClient
@@ -131,7 +141,8 @@ def main():
                'Часть B дополнительно требует строгий quality_gate до смены champion: одинаковые версии протокола и данных, полные непротиворечивые counts, отсутствие ошибок генерации, отсутствие общей/критической регрессии и прохождение трёх behavioral-кейсов. Отказ допустим и не обходится переименованием кандидата или изменением baseline.', '',
                f"Доказательство отрицательного теста: {json.dumps(negative, ensure_ascii=False) if negative else 'ожидает make check-negative на реальных ответах'}. Unit-тесты выполняются отдельно и не выдаются за реальную оценку модели.", '',
                '## Переносимость Windows', '',
-               'В чтении/записи конфигурации, manifest и оценки явно задан UTF-8; изолированный predict выводит ASCII JSON. Makefile включает UTF-8 и немедленный вывод; scripts/run_command.py находит Docker Desktop и Git Bash без ручной настройки PATH. CPU/float32 выбран согласно методичке; бюджет поиска не увеличен. Тесты не изменены, выданный общий отпечаток c42ac7788026.', '',
+               'В чтении/записи конфигурации, manifest и оценки явно задан UTF-8; изолированный predict выводит ASCII JSON. Makefile включает UTF-8 и немедленный вывод; scripts/run_command.py находит Docker Desktop и Git Bash без ручной настройки PATH. scripts/normalize_packages.py исправляет Windows-пути внутри MLmodel: artifacts/adapter и упакованный model.py вместо обратных слешей/абсолютного пути; веса не меняются. Это обнаруженная реальной проверкой проблема переносимости MLflow 2.22. CPU/float32 выбран согласно методичке; бюджет поиска не увеличен. Тесты не изменены, выданный общий отпечаток c42ac7788026.', '',
+               'В отрицательной проверке evaluation/cli.py портится копия raw-ответов, затем score пересчитывает все counts. Ручная подмена одного счётчика удалена, чтобы отказ доказывал ухудшение ответов, а не внутреннюю несогласованность отчёта. При первоначальном сбое Docker добавлен scripts/import_offline.py: перенос реальных runs с полной историей метрик и побайтовой проверкой артефактов. Он не обучает модель и не меняет измеренные значения.', '',
                '## Вывод', '',
                'Исправлены четыре причины ошибок учёта/хранения/версий/допуска и реализованы score/quality_gate. Фактические результаты запуска, включая отсутствующие этапы и отказы, отражены в docs/conclusion.md.', '']
     Path('docs/defects.md').write_text('\n'.join(defects), encoding='utf-8')

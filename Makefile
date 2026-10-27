@@ -9,6 +9,7 @@ down:
 	uv run python scripts/run_command.py docker compose -p mlops-hw6 down
 sweep:
 	uv run python -u -m src.sweep
+	uv run python scripts/normalize_packages.py
 promote:
 	uv run python -m evaluation.cli promote
 predict:
