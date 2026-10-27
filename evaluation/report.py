@@ -92,7 +92,17 @@ def main():
             lines += [f'Текущий champion: models:/{version.name}/{version.version}; run={version.run_id}.', '']
         except Exception as exc:
             lines += [f'Чтение champion: {type(exc).__name__}: {exc}. При непройденном gate новый champion не назначается.', '']
-    lines += ['## Ограничения оценки и модельный судья', '',
+    lines += ['## Ссылки на MLflow и воспроизводимость', '']
+    uri = os.environ.get('MLFLOW_TRACKING_URI', 'http://127.0.0.1:5006')
+    if uri.startswith(('http://', 'https://')) and sweep:
+        from mlflow import MlflowClient
+        client = MlflowClient(tracking_uri=uri)
+        for run_id in [sweep['parent_id'], *[r['run_id'] for r in sweep['rows']], *([b['evaluation_run_id']] if b else [])]:
+            run = client.get_run(run_id)
+            lines.append(f'- [Run {run_id}]({uri}/#/experiments/{run.info.experiment_id}/runs/{run_id})')
+    else:
+        lines += [f'Текущее tracking-хранилище: `{uri}`. Это локальная резервная запись; доступность Docker-сервера и сохранность volume проверяются отдельно.']
+    lines += ['', 'SHA256 кода, конфига и файлов данных записаны в metrics/sweep.json и tags runs; исходный Git-коммит записан в provenance. Протокол оценки, golden и baseline имеют отдельные SHA256. Исходные tests/ не изменены: c42ac7788026.', '', '## Ограничения оценки и модельный судья', '',
               'Accuracy проверяет совпадение метки с проверенным эталоном, format rate — пригодность ответа к автоматическому разбору. BLEU/ROUGE/BERTScore могут считать похожими ответы с противоположными метками и не заменяют эту проверку. На 50 курируемых примерах нельзя уверенно переносить небольшую разницу на весь поток данных; важны n и новые ошибки.', '',
               'LLM-судья мог бы помочь разобрать сарказм и неоднозначные социальные сообщения по явной рубрике. Возможны смещения к порядку A/B, стилю и многословию, ошибки на иронии и контексте. Нужны скрытые имена моделей, перестановка A/B, сохранённые вердикты и проверка спорных случаев человеком. Платный API не использовался, judge не заменяет scorer меток.', '',
               '## Вывод', '']

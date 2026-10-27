@@ -232,11 +232,14 @@ def update_baseline():
 def negative():
     baseline, candidate = current_reports()
     rows = read_rows(read_json('evaluation/params.json')['golden'])
-    broken_outputs = [dict(id=r['id'], raw='INVALID', error=None) for r in rows]
+    # Меняем только копию raw-ответов и пересчитываем согласованные counts.
+    ids = {r['id'] for r in rows}
+    broken_outputs = copy.deepcopy(read_json('metrics/candidate-outputs.json'))
+    for output in broken_outputs:
+        if output['id'] in ids:
+            output.update(raw='INVALID', error=None)
     broken = copy.deepcopy(candidate)
-    broken.update(score(rows, broken_outputs))
-    broken['behavioral']['overall']['correct'] = 0
-    broken['behavioral']['overall']['accuracy'] = 0.0
+    broken.update(score(rows, [o for o in broken_outputs if o['id'] in ids]))
     try:
         quality_gate(baseline, broken, read_json('evaluation/params.json')['critical_slices'])
     except ValueError as exc:
