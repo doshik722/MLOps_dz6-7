@@ -1,70 +1,32 @@
-"""Отчёт ДЗ 5 из фактических метрик двух завершённых обучений."""
-
+"""Таблица из сервера, а не вручную переписанные числа."""
+import csv
+import io
 import json
-import platform
 from pathlib import Path
 
-import peft
-import torch
-import transformers
-
-from src.config import load_params
+from mlflow import MlflowClient
+from src.common import connect, load_params
 
 
-def main() -> None:
-    params = load_params()
-    mdir = Path(params["paths"]["metrics"])
-    runs = {
-        name: json.loads((mdir / f"train_{name}.json").read_text(encoding="utf-8"))
-        for name in ("all_layers", "freeze14")
-    }
-    a, f = runs["all_layers"], runs["freeze14"]
-    subset = a.get("train_subset") or {}
-    cmp = json.loads((mdir / "compare_all_layers.json").read_text(encoding="utf-8"))
-    adapter_cfg = json.loads((Path(f["adapter_dir"]) / "adapter_config.json").read_text(encoding="utf-8"))
-    mode = "полная эпоха" if params["train"]["max_steps"] is None else f"ограниченный прогон: {params['train']['max_steps']} шагов"
-    lines = [
-        "# ДЗ 5 — LoRA на классификации тональности русских предложений", "",
-        "## Условия эксперимента", "",
-        f"Модель: `{a['model']}`. ОС: `{platform.platform()}`. Процессор: Intel Core i7-1165G7, 4 ядра, 8 потоков; RAM 16 ГБ. Устройство: `{a['device']}`, dtype: `{a['dtype']}`.", "",
-        f"Версии: Python {platform.python_version()}, torch {torch.__version__}, transformers {transformers.__version__}, peft {peft.__version__}; точные зависимости сохранены в uv.lock.", "",
-        f"Вход: собственные тензоры ДЗ 4. Из {subset.get('source_examples', a['train_examples'])} train-примеров выбран фиксированный стратифицированный срез {a['train_examples']} с seed={subset.get('seed', a['seed'])}; весь val-набор ({a['val_examples']} примеров) сохранён. Полных ответов в источнике: {subset.get('eligible_examples', a['train_examples'])}; не включены обрезанные метки {subset.get('excluded_incomplete_labels', {})}. Классы среза: {subset.get('selected_counts', {})}. Это полная эпоха по подвыборке, а не по всем исходным train-примерам; срез выбран для CPU и ограниченного времени до дедлайна. Токены и labels не менялись.", "",
-        f"Условия: {mode}, epochs={params['train']['epochs']}, seed={a['seed']}, lr={a['lr']}, r={params['lora']['r']}, alpha={params['lora']['alpha']}, dropout={params['lora']['dropout']}. Микробатч {params['train']['batch_size']}, накопление {params['train']['grad_accum']}, эффективный батч {a['effective_batch']}; CPU-потоков {params['train']['num_threads']}. Gradient checkpointing включён; val считается на всём val-наборе до обучения, каждые {params['train']['eval_every']} шагов и в конце.", "",
-        "| Вариант | Обучаемых параметров | Шагов | Train в начале → в конце | Val базы → в конце | Обучение, с | Оценка, с | Пик памяти, МБ | Адаптер, МиБ |", "|---|---:|---:|---|---|---:|---:|---:|---:|",
-    ]
-    for name, m in runs.items():
-        lines.append(f"| {name} | {m['trainable_params']:,} | {m['steps']} | {m['curve_train'][0][1]} → {m['curve_train'][-1][1]} | {m['base_val_loss']:.4f} → {m['final_val_loss']} | {m['seconds']} | {m['base_eval_seconds'] + m['eval_seconds']:.1f} | {m['peak_memory_mb']} | {m['adapter_size_mb']} |")
-    lines += [
-        "", f"Метрика памяти: `{a['memory_metric']}`. Это пик памяти отдельного процесса на Windows, а не размер одного адаптера. Время обучения исключает оценку val; её время указано отдельно. Размер папки включает токенизатор. Параметры и условия эталона Apple Silicon из лекции не выдаются за результаты этого ноутбука.", "",
-        "## 1. Обучение без валидации", "",
-        "Дефект: evaluate() уже была написана, но не вызывалась. base_val оставался None, а curve_val — пустым списком. В журнале был только train loss: нельзя было отличить запоминание обучающего набора от улучшения на отложенных данных и нельзя было сравнить адаптер с базой.", "",
-        "Исправление в src/train.py: evaluate() вызывается до первого обновления, с периодом train.eval_every и на последнем шаге. Нулевая поправка LoRA даёт качество базовой модели на шаге 0. Средний loss взвешивается числом ответных токенов, а labels=-100 на промпте и паддинге не участвуют в оценке. Валидация работает в model.eval() и без градиентов, затем возвращается model.train().", "",
-        f"Подтверждение: all_layers содержит {len(a['curve_val'])} точек val, первая на шаге {a['curve_val'][0][0]}; loss {a['base_val_loss']:.4f} → {a['final_val_loss']}. У freeze14: {f['base_val_loss']:.4f} → {f['final_val_loss']}. Кривые обеих моделей — docs/curves.png.", "",
-        "## 2. Слишком большой learning rate", "",
-        "Дефект в params.yaml: lr=1e-2. Сохранение адаптера и отсутствие NaN сами по себе не доказывают полезное обучение: большие обновления могут ухудшить модель, а loss остаться конечным. В лекции именно такой шаг приводит к резкому росту ошибки.", "",
-        "Исправление: lr=2e-4 по ориентиру лекции. Warmup, cosine scheduler, clipping градиентов и эффективный размер батча сохранены. Порог проверки не ослаблялся, метрики создаются обучением, а не вручную.", "",
-        f"Подтверждение текущего прогона: train all_layers {a['curve_train'][0][1]} → {a['curve_train'][-1][1]}, diverged={a['diverged']}; val базы {a['base_val_loss']:.4f}, итоговый {a['final_val_loss']}. Исторический запуск с lr=1e-2 на этих данных не проводился, числа расходимости из лекции не являются нашим замером.", "",
-        "## 3. Заморозка первых 14 слоёв не применялась", "",
-        "Дефект в src/train.py: lora_config() принимала freeze_first и n_layers, но не использовала их. Оба варианта навешивали LoRA на все слои. Значение freeze_first в имени или JSON не является доказательством заморозки.", "",
-        "Исправление: layers_to_transform=list(range(freeze_first, n_layers)). Базовые веса заморожены в обоих вариантах; в freeze14 обучаемые матрицы LoRA есть только в слоях 14–27. Слои 0–13 продолжают выполнять прямой проход, но не содержат обучаемых адаптеров.", "",
-        f"Подтверждение: layers_to_transform={adapter_cfg['layers_to_transform']}; обучаемых параметров {f['trainable_params']:,} вместо {a['trainable_params']:,}. Время {f['seconds']} против {a['seconds']} с, память {f['peak_memory_mb']} против {a['peak_memory_mb']} МБ. Снижение числа параметров не гарантирует такое же снижение времени.", "",
-        "## 4. Адаптер нельзя было передать отдельно", "",
-        "Дефект: сохранялся только model.save_pretrained(), а src/compare.py загружал токенизатор по имени модели из конфигурации. На компьютере автора помогал локальный кеш. После копирования одной папки адаптера токенизатора и шаблона чата не было.", "",
-        "Исправление: tokenizer.save_pretrained(adapter_dir); load_adapter_tokenizer() читает токенизатор из папки адаптера с local_files_only=True. Сохранены левый padding и pad token, согласованные со входом ДЗ 4. Внутри папки находятся маленькие матрицы LoRA, конфигурация и токенизатор; embed_tokens / lm_head в modules_to_save не добавлялись. Базовые веса Qwen остаются внешней зависимостью: проверка офлайн предполагает, что база уже скачана в кеш.", "",
-        f"Подтверждение: папка all_layers — {a['adapter_size_mb']} МиБ, freeze14 — {f['adapter_size_mb']} МиБ, обе меньше 100. Сравнение содержит {len(cmp['adapter'])} ответов адаптера. Исходная проверка 4 копирует папку и сверяет ответы офлайн дословно; фактический результат показывается в терминале при make check.", "",
-        "## 5. Seed был объявлен, но не применялся", "",
-        "Дефект: функция set_seed() была в src/runtime.py, но не вызывалась из src/train.py. Одинаковый seed в YAML и фиксированный порядок примеров не фиксировали начальную матрицу A и случайные маски dropout. Получались разные эксперименты при одном конфиге.", "",
-        "Исправление: set_seed() вызывается до загрузки и подключения LoRA. Фиксируются Python, NumPy и PyTorch; включены детерминированные алгоритмы. Порядок примеров задаётся локальным генератором с seed + epoch. Сравнение выполняется с do_sample=False, поэтому случайная выборка токенов не мешает сравнению базы с адаптером.", "",
-        f"Подтверждение условий: seed={a['seed']} у обоих вариантов; итоговый скрипт проверки дважды обучает all_layers по три шага и сравнивает curve_train. Он не требует одинакового времени и памяти: эти величины меняются из-за нагрузки ОС. Гарантия повторяемости относится к одинаковому железу и версиям библиотек, а не к побитовому совпадению между CPU, CUDA и MPS.", "",
-        "## Дополнительные согласования", "",
-        "В params.yaml выбран CPU/float32 и микробатч 1 с накоплением 8. src/prepare_subset.py создаёт стратифицированный срез 512 train-примеров, сохраняя исходные файлы и пропорции классов; индексы и SHA256 источника записаны в метрики. DVC содержит отдельную стадию подвыборки. Пять медицинских вопросов заменены примерами тональности из val; системная инструкция согласована с ДЗ 4. Пять ответов — демонстрация адаптера, а не достоверная оценка accuracy. В src/train.py исправлен шаг последней неполной группы и скорость по фактическим токенам. Пути в JSON записываются с / для Git Bash. make train выводит ход обучения непосредственно в терминал; make compare формирует сравнение и этот отчёт.", "",
-        "## Вывод", "",
-        f"Проведены два самостоятельных обучения ({a['steps']} и {f['steps']} шагов) на собственных данных ДЗ 4. Получены передаваемые адаптеры и кривые train/val, результаты сравнения базы с LoRA. Итоговые проверки выполняются исходным tests/check.sh с отпечатком 06a02208c1f0; его содержимое не менялось. Если проверка обнаружит ухудшение val или невоспроизводимость, эксперимент требует исправления — одного факта сохранения файлов недостаточно.", "",
-    ]
-    out = Path("docs/defects.md")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines), encoding="utf-8")
-    print(f"-> {out}")
+def main():
+    p = load_params()
+    connect(p)
+    summary = json.loads(Path("metrics/sweep.json").read_text())
+    client = MlflowClient()
+    rows = []
+    for item in summary["rows"]:
+        run = client.get_run(item["run_id"])
+        rows.append({"name": item["name"], "run_id": run.info.run_id,
+            **{k: run.data.params[k] for k in ("r", "lr", "target_modules")},
+            **{k: run.data.metrics[k] for k in ("base_val_loss", "final_val_loss", "seconds", "peak_memory_mb", "adapter_mb")}})
+    rows.sort(key=lambda row: row["final_val_loss"])
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    Path("docs").mkdir(exist_ok=True)
+    Path("docs/comparison.csv").write_text(out.getvalue(), encoding="utf-8")
+    print(out.getvalue())
 
 
 if __name__ == "__main__":

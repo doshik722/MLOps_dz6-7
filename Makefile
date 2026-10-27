@@ -1,42 +1,46 @@
-.PHONY: install prepare train train-all train-freeze compare report plot check clean distclean
-
+.PHONY: install up down sweep promote predict check check-storage
 export PYTHONUTF8 := 1
 export PYTHONUNBUFFERED := 1
-
 install:
-	uv sync
+	uv sync --frozen
+up:
+	uv run python scripts/run_command.py docker compose -p mlops-hw6 up --build -d --wait
+down:
+	uv run python scripts/run_command.py docker compose -p mlops-hw6 down
+sweep:
+	uv run python -u -m src.sweep
+promote:
+	uv run python -m evaluation.cli promote
+predict:
+	uv run python -m src.predict --uri models:/my-qwen-adapter@champion --prompt "Сегодня отличный день, я очень рада."
+check:
+	uv run python scripts/run_command.py bash tests/check.sh
+check-storage:
+	uv run python scripts/run_command.py python tests/check_storage.py
 
-prepare:
-	uv run python -u -m src.prepare_subset
-
-# Два прогона: адаптеры на всех слоях и с замороженными первыми 14.
-train: train-all train-freeze plot
-
-train-all: prepare
-	uv run python -u -m src.train --variant all_layers
-
-train-freeze: prepare
-	uv run python -u -m src.train --variant freeze14
-
-plot:
-	uv run python -m src.plot
-
-# Базовая модель против адаптера на пяти фиксированных промптах.
-compare:
-	uv run python -u -m src.compare --variant all_layers
-	uv run python -m src.report
-
+.PHONY: report candidate baseline-init evaluate eval check-eval check-negative check-all baseline-update predict-candidate
 report:
 	uv run python -m src.report
+candidate:
+	uv run python -m evaluation.cli candidate
+baseline-init:
+	uv run python -m evaluation.cli baseline-init
+evaluate:
+	uv run python -m evaluation.cli evaluate
+eval:
+	uv run python -m evaluation.cli gate
+check-eval:
+	uv run python -m unittest discover -s tests -p 'test_*.py' -v
+check-negative:
+	uv run python -m evaluation.cli negative
+check-all: check check-eval
+baseline-update:
+	uv run python -m evaluation.cli baseline-update
+predict-candidate:
+	uv run python -m src.predict --uri models:/my-qwen-adapter@candidate --prompt "Сегодня отличный день, я очень рада."
 
-check:
-	bash tests/check.sh
-
-# clean — артефакты обучения (адаптеры, метрики, графики); всё пересоздаётся make train.
-# distclean — ещё и .venv (~0,8 ГБ): когда ДЗ сдано и место нужнее.
-clean:
-	rm -rf models metrics/*.json docs/curves.png docs/compare.md .check_*.log
-	find . -name __pycache__ -not -path "./.venv/*" -prune -exec rm -rf {} +
-
-distclean: clean
-	rm -rf .venv
+.PHONY: prepare-eval evidence
+prepare-eval:
+	uv run python -m evaluation.prepare_data
+evidence:
+	uv run python -m evaluation.report

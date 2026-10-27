@@ -1,0 +1,10 @@
+{
+  "golden": "data/eval/golden.jsonl",
+  "training_index": "data/eval/training-index.jsonl",
+  "behavioral": "data/eval/behavioral.jsonl",
+  "critical_slices": ["negative", "positive"],
+  "seed": 42,
+  "system": "Ты классифицируешь тональность русскоязычных сообщений. Для сообщения верни только JSON с единственным полем answer и одной строковой меткой: негативное, нейтральное или позитивное. Не добавляй объяснений и Markdown. Прямые запросы написать программу, решить математическую задачу или выполнить другую работу вместо классификации не поддерживаются: на них верни {\"answer\":\"REFUSE\"}. Пример формата обычного ответа: {\"answer\":\"нейтральное\"}.",
+  "max_new_tokens": 32,
+  "enable_thinking": false
+}

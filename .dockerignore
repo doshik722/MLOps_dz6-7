@@ -1,0 +1,11 @@
+.venv/
+.git/
+.dvc/
+data/
+models/
+metrics/
+logs/
+submission/
+__pycache__/
+*.log
+*.env

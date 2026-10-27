@@ -38,11 +38,6 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    # Одинаковый порядок вычислений при повторном запуске на этом железе.
-    torch.use_deterministic_algorithms(True)
-    if torch.backends.cudnn.is_available():
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
@@ -53,13 +48,11 @@ def allocated_bytes(device: torch.device) -> int:
         return torch.mps.driver_allocated_memory()
     if device.type == "cuda":
         return torch.cuda.memory_allocated()
-    info = psutil.Process().memory_info()
-    # Windows хранит максимум за жизнь процесса; варианты запускаются отдельно.
-    return getattr(info, "peak_wset", info.rss)
+    return psutil.Process().memory_info().rss
 
 
 def memory_metric(device: torch.device) -> str:
     return {
         "mps": "torch.mps.driver_allocated_memory",
         "cuda": "torch.cuda.memory_allocated",
-    }.get(device.type, "RSS процесса: peak_wset" if os.name == "nt" else "RSS процесса (выборочный пик)")
+    }.get(device.type, "RSS процесса")
